@@ -1,0 +1,10 @@
+<div class="fieldset" data-bind="visible: allowDropbox">
+	<h2 class="subtitle" data-i18n="SETTINGS/SERVICES_DROPBOX" data-bind="i18n: 'text'"></h2>
+	<div class="hint" data-i18n="SETTINGS/SERVICES_DROPBOX_HINT" data-bind="i18n: 'text'"></div>
+	<div class="buttons" style="text-align: left;">
+		<span class="button" data-bind="click: onDropboxSignInClick">
+			<span data-i18n="SETTINGS/SERVICES_BUTTON_ENABLE" data-bind="i18n: 'text', visible: !dropboxConnected()"></span>
+			<span data-i18n="SETTINGS/SERVICES_BUTTON_DISABLE" data-bind="i18n: 'text', visible: dropboxConnected()"></span>
+		</span>
+	</div>
+</div>
