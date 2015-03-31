@@ -1,10 +1,6 @@
 <?php
 
-/*
- * Copyright (C) 2002-2013 AfterLogic Corp. (www.afterlogic.com)
- * Distributed under the terms of the license described in LICENSE
- *
- */
+/* -AFTERLOGIC LICENSE HEADER- */
 
 class_exists('CApi') or die();
 
@@ -13,6 +9,7 @@ include_once 'libs/Dropbox/autoload.php';
 class CFilestorageDropboxPlugin extends AApiPlugin
 {
 	const StorageType = 4;
+	const StorageTypeStr = 'dropbox';
 	const DisplayName = 'Dropbox';
 	
 	/* @var $oSocial \CSocial */
@@ -30,7 +27,11 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 	{
 		parent::Init();
 		
+		$this->AddJsFile('js/include.js');
+
 		$this->AddCssFile('css/style.css');
+		
+		$this->IncludeTemplate('Settings_ServicesSettingsViewModel', 'ServicesSettings-Before-Buttons', 'templates/index.html');
 		
 		$this->AddHook('filestorage.get-external-storages', 'GetExternalStorage');
 		$this->AddHook('filestorage.file-exists', 'FileExists');
@@ -53,15 +54,19 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 		{
 			/* @var $oApiSocial \CApiSocialManager */
 			$oApiSocial = \CApi::Manager('social');
-			$this->oSocial = $oApiSocial->GetSocial($oAccount->IdAccount, \ESocialType::Dropbox);
+			$mResult = $oApiSocial->GetSocial($oAccount->IdAccount, self::StorageTypeStr);
+			if ($mResult !== null && $mResult->IssetScope('filestorage'))
+			{
+				$this->oSocial = $mResult;
+			}
 		}
 		return $this->oSocial;
 	}
 	
-	protected function GetClient($oAccount, $iType)
+	protected function GetClient($oAccount, $sType)
 	{
 		$mResult = false;
-		if ($iType === self::StorageType)
+		if ($sType === self::StorageTypeStr)
 		{
 			/* @var $oTenant \CTenant */
 			$oTenant = null;
@@ -74,7 +79,14 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 			
 			/* @var $oSocial \CSocial */
 			$oSocial = $this->GetSocial($oAccount);
-			if ($oSocial && $oTenant && $oTenant->SocialDropboxAllow)
+			
+			$oTenantSocial = null;
+			if ($oTenant)
+			{
+				/* @var $oTenantSocial \CSocial */
+				$oTenantSocial = $oTenant->GetSocialByName('dropbox');
+			}
+			if ($oSocial && $oTenantSocial && $oTenantSocial->SocialAllow && $oTenantSocial->IssetScope('filestorage'))
 			{
 				$mResult = new \Dropbox\Client($oSocial->AccessToken, "Aurora App");
 			}
@@ -88,7 +100,7 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 		if ($this->GetSocial($oAccount))
 		{
 			$aResult[] = array(
-				'Type' => self::StorageType,
+				'Type' => self::StorageTypeStr,
 				'DisplayName' => self::DisplayName
 			);
 		}
@@ -97,9 +109,9 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 	/**
 	 * @param \CAccount $oAccount
 	 */
-	public function FileExists($oAccount, $iType, $sPath, $sName, &$bResult, &$bBreak)
+	public function FileExists($oAccount, $sType, $sPath, $sName, &$bResult, &$bBreak)
 	{
-		$oClient = $this->GetClient($oAccount, $iType);
+		$oClient = $this->GetClient($oAccount, $sType);
 		if ($oClient)
 		{
 			$bResult = false;
@@ -127,7 +139,7 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 	/**
 	 * @param array $aData
 	 */
-	protected function PopulateFileInfo($oAccount, $iType, $oClient, $aData)
+	protected function PopulateFileInfo($oAccount, $sType, $oClient, $aData)
 	{
 		$bResult = false;
 		if ($aData && is_array($aData))
@@ -137,7 +149,7 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 			$oSocial = $this->GetSocial($oAccount);
 			$bResult /*@var $bResult \CFileStorageItem */ = new  \CFileStorageItem();
 			$bResult->IsExternal = true;
-			$bResult->Type = $iType;
+			$bResult->TypeStr = $sType;
 			$bResult->IsFolder = $aData['is_dir'];
 			$bResult->Id = $this->_basename($aData['path']);
 			$bResult->Name = $bResult->Id;
@@ -149,7 +161,7 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 			$bResult->FullPath = $bResult->Name !== '' ? $bResult->Path . '/' . $bResult->Name : $bResult->Path ;
 			
 			$bResult->Hash = \CApi::EncodeKeyValues(array(
-				'Type' => $iType,
+				'Type' => $sType,
 				'Path' => $bResult->Path,
 				'Name' => $bResult->Name,
 				'Size' => $bResult->Size
@@ -173,23 +185,23 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 	/**
 	 * @param \CAccount $oAccount
 	 */
-	public function GetFileInfo($oAccount, $iType, $sPath, $sName, &$bResult, &$bBreak)
+	public function GetFileInfo($oAccount, $sType, $sPath, $sName, &$bResult, &$bBreak)
 	{
-		$oClient = $this->GetClient($oAccount, $iType);
+		$oClient = $this->GetClient($oAccount, $sType);
 		if ($oClient)
 		{
 			$bBreak = true;
 			$aData = $oClient->getMetadata('/'.ltrim($sPath, '/').'/'.$sName);
-			$bResult = $this->PopulateFileInfo($oAccount, $iType, $oClient, $aData);
+			$bResult = $this->PopulateFileInfo($oAccount, $sType, $oClient, $aData);
 		}
 	}	
 	
 	/**
 	 * @param \CAccount $oAccount
 	 */
-	public function GetFile($oAccount, $iType, $sPath, $sName, &$bResult, &$bBreak)
+	public function GetFile($oAccount, $sType, $sPath, $sName, &$bResult, &$bBreak)
 	{
-		$oClient = $this->GetClient($oAccount, $iType);
+		$oClient = $this->GetClient($oAccount, $sType);
 		if ($oClient)
 		{
 			$bBreak = true;
@@ -204,9 +216,9 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 	/**
 	 * @param \CAccount $oAccount
 	 */
-	public function GetFiles($oAccount, $iType, $sPath, $sPattern, &$bResult, &$bBreak)
+	public function GetFiles($oAccount, $sType, $sPath, $sPattern, &$bResult, &$bBreak)
 	{
-		$oClient = $this->GetClient($oAccount, $iType);
+		$oClient = $this->GetClient($oAccount, $sType);
 		if ($oClient)
 		{
 			$bResult = array();
@@ -226,7 +238,7 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 			
 			foreach($aItems as $aChild) 
 			{
-				$oItem /*@var $oItem \CFileStorageItem */ = $this->PopulateFileInfo($oAccount, $iType, $oClient, $aChild);
+				$oItem /*@var $oItem \CFileStorageItem */ = $this->PopulateFileInfo($oAccount, $sType, $oClient, $aChild);
 				if ($oItem)
 				{
 					$bResult[] = $oItem;
@@ -238,9 +250,9 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 	/**
 	 * @param \CAccount $oAccount
 	 */
-	public function CreateFolder($oAccount, $iType, $sPath, $sFolderName, &$bResult, &$bBreak)
+	public function CreateFolder($oAccount, $sType, $sPath, $sFolderName, &$bResult, &$bBreak)
 	{
-		$oClient = $this->GetClient($oAccount, $iType);
+		$oClient = $this->GetClient($oAccount, $sType);
 		if ($oClient)
 		{
 			$bResult = false;
@@ -256,9 +268,9 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 	/**
 	 * @param \CAccount $oAccount
 	 */
-	public function CreateFile($oAccount, $iType, $sPath, $sFileName, $mData, &$bResult, &$bBreak)
+	public function CreateFile($oAccount, $sType, $sPath, $sFileName, $mData, &$bResult, &$bBreak)
 	{
-		$oClient = $this->GetClient($oAccount, $iType);
+		$oClient = $this->GetClient($oAccount, $sType);
 		if ($oClient)
 		{
 			$bResult = false;
@@ -282,9 +294,9 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 		}
 	}	
 	
-	public function CreatePublicLink($oAccount, $iType, $sPath, $sName, &$bResult, &$bBreak)
+	public function CreatePublicLink($oAccount, $sType, $sPath, $sName, &$bResult, &$bBreak)
 	{
-		$oClient = $this->GetClient($oAccount, $iType);
+		$oClient = $this->GetClient($oAccount, $sType);
 		if ($oClient)
 		{
 			$bBreak = true;
@@ -292,9 +304,9 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 		}
 	}	
 
-	public function DeletePublicLink($oAccount, $iType, $sPath, $sName, &$bResult, &$bBreak)
+	public function DeletePublicLink($oAccount, $sType, $sPath, $sName, &$bResult, &$bBreak)
 	{
-		$oClient = $this->GetClient($oAccount, $iType);
+		$oClient = $this->GetClient($oAccount, $sType);
 		if ($oClient)
 		{
 			$bBreak = true;
@@ -317,9 +329,9 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 	/**
 	 * @param \CAccount $oAccount
 	 */
-	public function Delete($oAccount, $iType, $sPath, $sName, &$bResult, &$bBreak)
+	public function Delete($oAccount, $sType, $sPath, $sName, &$bResult, &$bBreak)
 	{
-		$oClient = $this->GetClient($oAccount, $iType);
+		$oClient = $this->GetClient($oAccount, $sType);
 		if ($oClient)
 		{
 			$bResult = false;
@@ -335,9 +347,9 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 	/**
 	 * @param \CAccount $oAccount
 	 */
-	public function Rename($oAccount, $iType, $sPath, $sName, $sNewName, &$bResult, &$bBreak)
+	public function Rename($oAccount, $sType, $sPath, $sName, $sNewName, &$bResult, &$bBreak)
 	{
-		$oClient = $this->GetClient($oAccount, $iType);
+		$oClient = $this->GetClient($oAccount, $sType);
 		if ($oClient)
 		{
 			$bResult = false;
@@ -354,15 +366,15 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 	/**
 	 * @param \CAccount $oAccount
 	 */
-	public function Move($oAccount, $iFromType, $iToType, $sFromPath, $sToPath, $sName, $sNewName, &$bResult, &$bBreak)
+	public function Move($oAccount, $sFromType, $sToType, $sFromPath, $sToPath, $sName, $sNewName, &$bResult, &$bBreak)
 	{
-		$oClient = $this->GetClient($oAccount, $iFromType);
+		$oClient = $this->GetClient($oAccount, $sFromType);
 		if ($oClient)
 		{
 			$bResult = false;
 			$bBreak = true;
 			
-			if ($iToType === $iFromType)
+			if ($sToType === $sFromType)
 			{
 				if ($oClient->move('/'.ltrim($sFromPath, '/').'/'.$sName, '/'.ltrim($sToPath, '/').'/'.$sNewName))
 				{
@@ -375,15 +387,15 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 	/**
 	 * @param \CAccount $oAccount
 	 */
-	public function Copy($oAccount, $iFromType, $iToType, $sFromPath, $sToPath, $sName, $sNewName, &$bResult, &$bBreak)
+	public function Copy($oAccount, $sFromType, $sToType, $sFromPath, $sToPath, $sName, $sNewName, &$bResult, &$bBreak)
 	{
-		$oClient = $this->GetClient($oAccount, $iFromType);
+		$oClient = $this->GetClient($oAccount, $sFromType);
 		if ($oClient)
 		{
 			$bResult = false;
 			$bBreak = true;
 			
-			if ($iToType === $iFromType)
+			if ($sToType === $sFromType)
 			{
 				if ($oClient->copy('/'.ltrim($sFromPath, '/').'/'.$sName, '/'.ltrim($sToPath, '/').'/'.$sNewName))
 				{
