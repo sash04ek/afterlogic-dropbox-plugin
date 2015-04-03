@@ -27,11 +27,7 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 	{
 		parent::Init();
 		
-		$this->AddJsFile('js/include.js');
-
 		$this->AddCssFile('css/style.css');
-		
-		$this->IncludeTemplate('Settings_ServicesSettingsViewModel', 'ServicesSettings-Before-Buttons', 'templates/index.html');
 		
 		$this->AddHook('filestorage.get-external-storages', 'GetExternalStorage');
 		$this->AddHook('filestorage.file-exists', 'FileExists');
