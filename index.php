@@ -51,7 +51,7 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 			/* @var $oApiSocial \CApiSocialManager */
 			$oApiSocial = \CApi::Manager('social');
 			$mResult = $oApiSocial->GetSocial($oAccount->IdAccount, self::StorageTypeStr);
-			if ($mResult !== null && $mResult->IssetScope('filestorage'))
+			if ($mResult !== null && $mResult->IssetScope('filestorage')&& !$mResult->Disabled)
 			{
 				$this->oSocial = $mResult;
 			}
