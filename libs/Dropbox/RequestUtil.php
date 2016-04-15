@@ -88,7 +88,7 @@ final class RequestUtil
 
         //$curl->set(CURLOPT_VERBOSE, true);  // For debugging.
         // TODO: Figure out how to encode clientIdentifier (urlencode?)
-        $curl->addHeader("User-Agent: ".$clientIdentifier." Dropbox-PHP-SDK");
+        $curl->addHeader("User-Agent: ".$clientIdentifier." Dropbox-PHP-SDK/".SdkVersion::VERSION);
 
         return $curl;
     }
@@ -251,6 +251,7 @@ final class RequestUtil
         if ($sc === 401) return new Exception_InvalidAccessToken($message);
         if ($sc === 500 || $sc === 502) return new Exception_ServerError($message);
         if ($sc === 503) return new Exception_RetryLater($message);
+        if ($sc === 507) return new Exception_OverQuota($message);
 
         return new Exception_BadResponseCode("Unexpected $message", $sc);
     }
