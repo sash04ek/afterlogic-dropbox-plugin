@@ -2,8 +2,6 @@
 
 class_exists('CApi') or die();
 
-include_once 'libs/Dropbox/autoload.php';
-
 class CFilestorageDropboxPlugin extends AApiPlugin
 {
 	const StorageType = 4;
@@ -82,7 +80,13 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 			}
 			if ($oSocial && $oTenantSocial && $oTenantSocial->SocialAllow && $oTenantSocial->IssetScope('filestorage'))
 			{
-				$mResult = new \Dropbox\Client($oSocial->AccessToken, "Aurora App");
+				
+				$oDropboxApp = new \Kunnu\Dropbox\DropboxApp(
+					$oTenantSocial->SocialId,
+					$oTenantSocial->SocialSecret,
+					$oSocial->AccessToken
+				);
+				$mResult = new \Kunnu\Dropbox\Dropbox($oDropboxApp);
 			}
 		}
 		
@@ -111,7 +115,7 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 			$bResult = false;
 			$bBreak = true;
 			
-			if ($oClient->getMetadata('/'.ltrim($sPath, '/').'/'.$sName))
+			if ($oClient->getMetadata($sPath.'/'.$sName))
 			{
 				$bResult = true;
 			}
@@ -129,36 +133,51 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 		$aPath = explode('/', $sPath);
 		return end($aPath); 
 	}
+	
+	protected function hasThumb($sName)
+	{
+		return in_array(
+			pathinfo($sName, PATHINFO_EXTENSION), 
+			['jpg', 'jpeg', 'png', 'tiff', 'tif', 'gif', 'bmp']
+		);
+	}	
 
 	/**
 	 * @param array $aData
 	 */
 	protected function PopulateFileInfo($oAccount, $sType, $oClient, $aData)
 	{
-		$bResult = false;
-		if ($aData && is_array($aData))
+		$mResult = false;
+		if ($aData)
 		{
-			$sPath = ltrim($this->_dirname($aData['path']), '/');
+			$sPath = ltrim($this->_dirname($aData->getPathDisplay()), '/');
 			
 			$oSocial = $this->GetSocial($oAccount);
-			$bResult /*@var $bResult \CFileStorageItem */ = new  \CFileStorageItem();
-			$bResult->IsExternal = true;
-			$bResult->TypeStr = $sType;
-			$bResult->IsFolder = $aData['is_dir'];
-			$bResult->Id = $this->_basename($aData['path']);
-			$bResult->Name = $bResult->Id;
-			$bResult->Path = !empty($sPath) ? '/'.$sPath : $sPath;
-			$bResult->Size = $aData['bytes'];
-			$bResult->Owner = $oSocial->Name;
-			$bResult->LastModified = date_timestamp_get($oClient->parseDateTime($aData['modified']));
-			$bResult->Shared = isset($aData['shared']) ? $aData['shared'] : false;
-			$bResult->FullPath = $bResult->Name !== '' ? $bResult->Path . '/' . $bResult->Name : $bResult->Path ;
+
+			$mResult /*@var $mResult \Aurora\Modules\Files\Classes\FileItem */ = new \CFileStorageItem();
+			$mResult->IsExternal = true;
+			$mResult->TypeStr = self::StorageTypeStr;
+			$mResult->IsFolder = ($aData instanceof \Kunnu\Dropbox\Models\FolderMetadata);
+			$mResult->Id = $aData->getName();
+			$mResult->Name = $mResult->Id;
+			$mResult->Path = !empty($sPath) ? '/'.$sPath : $sPath;
+			$mResult->Size = !$mResult->IsFolder ? $aData->getSize() : 0;
+//			$bResult->Owner = $oSocial->Name;
+			if (!$mResult->IsFolder)
+			{
+				$mResult->LastModified =  date("U",strtotime($aData->getServerModified()));
+			}
+//			$mResult->Shared = isset($aData['shared']) ? $aData['shared'] : false;
+			$mResult->FullPath = $mResult->Name !== '' ? $mResult->Path . '/' . $mResult->Name : $mResult->Path ;
+			$mResult->ContentType = api_Utils::MimeContentType($mResult->Name);
 			
-			$bResult->Hash = \CApi::EncodeKeyValues(array(
+			$mResult->Thumb = $this->hasThumb($mResult->Name);			
+			
+			$mResult->Hash = \CApi::EncodeKeyValues(array(
 				'Type' => $sType,
-				'Path' => $bResult->Path,
-				'Name' => $bResult->Name,
-				'Size' => $bResult->Size
+				'Path' => $mResult->Path,
+				'Name' => $mResult->Name,
+				'Size' => $mResult->Size
 			));
 /*				
 			if (!$oItem->IsFolder && $aChild['thumb_exists'])
@@ -173,7 +192,7 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 */
 			
 		}
-		return $bResult;
+		return $mResult;
 	}	
 	
 	/**
@@ -185,7 +204,7 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 		if ($oClient)
 		{
 			$bBreak = true;
-			$aData = $oClient->getMetadata('/'.ltrim($sPath, '/').'/'.$sName);
+			$aData = $oClient->getMetadata($sPath.'/'.$sName);
 			$bResult = $this->PopulateFileInfo($oAccount, $sType, $oClient, $aData);
 		}
 	}	
@@ -200,42 +219,50 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 		{
 			$bBreak = true;
 			
-			$bResult = fopen('php://memory','wb+');
-			$oClient->getFile('/'.ltrim($sPath, '/').'/'.$sName, $bResult);
-			rewind($bResult);
-			
+			$mDownloadResult = $oClient->download($sPath.'/'.$sName);
+			if ($mDownloadResult)
+			{
+				$bResult = \fopen('php://memory','r+');
+				\fwrite($bResult, $mDownloadResult->getContents());
+				\rewind($bResult);
+			}
 		}
 	}	
 	
 	/**
 	 * @param \CAccount $oAccount
 	 */
-	public function GetFiles($oAccount, $sType, $sPath, $sPattern, &$bResult, &$bBreak)
+	public function GetFiles($oAccount, $sType, $sPath, $sPattern, &$mResult, &$bBreak)
 	{
 		$oClient = $this->GetClient($oAccount, $sType);
 		if ($oClient)
 		{
-			$bResult = array();
+			$mResult = array();
 			$bBreak = true;
-			
 			$aItems = array();
-			$sPath = '/'.ltrim($sPath, '/');
 			if (empty($sPattern))
 			{
-				$aItem = $oClient->getMetadataWithChildren($sPath);
-				$aItems = $aItem['contents'];
+				$oListFolderContents = $oClient->listFolder($sPath);
+				$oItems = $oListFolderContents->getItems();
+				$aItems = $oItems->all();
 			}
 			else
 			{
-				$aItems = $oClient->searchFileNames($sPath, $sPattern);
+				$oListFolderContents = $oClient->search($sPath, $sPattern);
+				$oItems = $oListFolderContents->getItems();
+				$aItems = $oItems->all();
 			}
-			
-			foreach($aItems as $aChild) 
+
+			foreach($aItems as $oChild) 
 			{
-				$oItem /*@var $oItem \CFileStorageItem */ = $this->PopulateFileInfo($oAccount, $sType, $oClient, $aChild);
+				if ($oChild instanceof \Kunnu\Dropbox\Models\SearchResult)
+				{
+					$oChild = $oChild->getMetadata();
+				}
+				$oItem /*@var $oItem \Aurora\Modules\Files\Classes\FileItem */ = $this->PopulateFileInfo($oAccount, $sType, $oClient, $oChild);
 				if ($oItem)
 				{
-					$bResult[] = $oItem;
+					$mResult[]  = $oItem;
 				}
 			}				
 		}
@@ -252,38 +279,36 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 			$bResult = false;
 			$bBreak = true;
 
-			if ($oClient->createFolder('/'.ltrim($sPath, '/').'/'.$sFolderName) !== null)
-			{
-				$bResult = true;
-			}
+				if ($oClient->createFolder($sPath.'/'.$sFolderName) !== null)
+				{
+					$bResult = true;
+				}
 		}
 	}	
 
 	/**
 	 * @param \CAccount $oAccount
 	 */
-	public function CreateFile($oAccount, $sType, $sPath, $sFileName, $mData, &$bResult, &$bBreak)
+	public function CreateFile($oAccount, $sType, $sPath, $sFileName, $mData, &$mResult, &$bBreak)
 	{
 		$oClient = $this->GetClient($oAccount, $sType);
 		if ($oClient)
 		{
-			$bResult = false;
+			$mResult = false;
 			$bBreak = true;
 
-			$sPath = '/'.ltrim($sPath, '/').'/'.$sFileName;
-			if (is_resource($mData))
+			$Path = $sPath.'/'.$sFileName;
+			$rData = $mData;
+			if (!is_resource($mData))
 			{
-				if ($oClient->uploadFile($sPath, \Dropbox\WriteMode::add(), $mData))
-				{
-					$bResult = true;
-				}
+				$rData = fopen('php://memory','r+');
+				fwrite($rData, $mData);
+				rewind($rData);					
 			}
-			else
+			$oDropboxFile = \Kunnu\Dropbox\DropboxFile::createByStream($sFileName, $rData);
+			if ($oClient->upload($oDropboxFile,	$Path))
 			{
-				if ($oClient->uploadFileFromString($sPath, \Dropbox\WriteMode::add(), $mData))
-				{
-					$bResult = true;
-				}
+				$mResult = true;
 			}
 		}
 	}	
@@ -328,13 +353,10 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 		$oClient = $this->GetClient($oAccount, $sType);
 		if ($oClient)
 		{
-			$bResult = false;
 			$bBreak = true;
 			
-			if ($oClient->delete('/'.ltrim($sPath, '/').'/'.$sName))
-			{
-				$bResult = true;
-			}
+			$oClient->delete($sPath.'/'.$sName);
+			$bResult = true;
 		}
 	}	
 
@@ -349,8 +371,7 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 			$bResult = false;
 			$bBreak = true;
 			
-			$sPath = ltrim($sPath, '/');
-			if ($oClient->move('/'.$sPath.'/'.$sName, '/'.$sPath.'/'.$sNewName))
+			if ($oClient->move($sPath.'/'.$sName, $sPath.'/'.$sNewName))
 			{
 				$bResult = true;
 			}
@@ -370,7 +391,7 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 			
 			if ($sToType === $sFromType)
 			{
-				if ($oClient->move('/'.ltrim($sFromPath, '/').'/'.$sName, '/'.ltrim($sToPath, '/').'/'.$sNewName))
+				if ($oClient->move($sFromPath.'/'.$sName, $sToPath.'/'.$sNewName))
 				{
 					$bResult = true;
 				}
@@ -391,7 +412,7 @@ class CFilestorageDropboxPlugin extends AApiPlugin
 			
 			if ($sToType === $sFromType)
 			{
-				if ($oClient->copy('/'.ltrim($sFromPath, '/').'/'.$sName, '/'.ltrim($sToPath, '/').'/'.$sNewName))
+				if ($oClient->copy($sFromPath.'/'.$sName, $sToPath.'/'.$sNewName))
 				{
 					$bResult = true;
 				}

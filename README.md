@@ -15,3 +15,7 @@ http://www.afterlogic.com/wiki/Installing_a_plugin_(WebMail)
 The following item needs to be added in array defined in data/settings/config.php file:
 
 'plugins.afterlogic-dropbox-plugin' => true,
+
+The Dropbox PHP SDK can be installed through Composer.
+
+$ php composer require kunalvarma05/dropbox-php-sdk
